@@ -24,73 +24,80 @@
     </div>
 
 <script>
-// 1. YOUR TOKEN GOES HERE
+// 1. YOUR TOKEN
 Cesium.Ion.defaultAccessToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiI2NmUzZmIwNS00YTQyLTQ5ODUtOTNkMi05N2M2OGI0OWQ3MjUiLCJpZCI6NDI0MzM5LCJpYXQiOjE3NzczMDQxMzF9.s-jvG5s5JNYoyyvIKK6GPHIS3L3sDAZQrcNHJAJA1MU';
 
 // 2. Initialize the 3D World
 const viewer = new Cesium.Viewer('cesiumContainer', {
-    terrainProvider: Cesium.createWorldTerrain(),
+    terrainProvider: Cesium.createWorldTerrainAsync ? Cesium.createWorldTerrainAsync() : Cesium.createWorldTerrain(),
     animation: false, timeline: false, infoBox: false, selectionIndicator: false,
     baseLayerPicker: false, sceneModePicker: false
 });
 
-// 3. Add Google 3D Tiles (Make sure to "Add" this asset in your Cesium Ion Asset Depot)
-async function addGoogleTiles() {
+// 3. Add Buildings (Google 3D Tiles)
+async function setupWorld() {
     try {
-        const tileset = await Cesium.Cesium3DTileset.fromIonAssetId(2275207); // Asset ID for Google 3D Tiles
+        const tileset = await Cesium.Cesium3DTileset.fromIonAssetId(2275207);
         viewer.scene.primitives.add(tileset);
     } catch (error) {
-        // Fallback to OSM Buildings if Google Tiles fail
         viewer.scene.primitives.add(Cesium.createOsmBuildings());
     }
 }
-addGoogleTiles();
+setupWorld();
 
-// 4. Spawn Plane & Set Camera
+// 4. Flight State
+let speed = 0;
+let position = Cesium.Cartesian3.fromDegrees(-122.4194, 37.7749, 1000);
+let hpRoll = new Cesium.HeadingPitchRoll(0, 0, 0);
+
+// Spawn Plane
 const planeModel = 'https://raw.githubusercontent.com/CesiumGS/cesium/main/Apps/SampleData/models/CesiumAir/Cesium_Air.glb';
 const plane = viewer.entities.add({
+    position: position,
+    orientation: Cesium.Transforms.headingPitchRollQuaternion(position, hpRoll),
     model: { uri: planeModel, minimumPixelSize: 128 }
 });
 
-viewer.camera.setView({
-    destination: Cesium.Cartesian3.fromDegrees(-122.4194, 37.7749, 1000), // Start over San Francisco
-    orientation: { heading: 0, pitch: 0, roll: 0 }
-});
-
-// 5. Flight Physics Logic
-let speed = 0;
+// Keyboard Input
 const keys = {};
 window.onkeydown = (e) => keys[e.code] = true;
 window.onkeyup = (e) => keys[e.code] = false;
 
-viewer.scene.preRender.addEventListener(() => {
-    // Thrust & Braking
-    if (keys['ShiftLeft']) speed += 0.05;
-    if (keys['ControlLeft']) speed = Math.max(0, speed - 0.05);
+// 5. Game Loop
+viewer.scene.preUpdate.addEventListener((scene, time) => {
+    // Physics inputs
+    if (keys['ShiftLeft']) speed += 0.1;
+    if (keys['ControlLeft']) speed = Math.max(0, speed - 0.1);
     
-    // Steering
-    if (keys['KeyW']) viewer.camera.lookUp(0.01);
-    if (keys['KeyS']) viewer.camera.lookDown(0.01);
-    if (keys['KeyA']) viewer.camera.lookLeft(0.02);
-    if (keys['KeyD']) viewer.camera.lookRight(0.02);
-
-    // Apply movement
-    viewer.camera.moveForward(speed);
-
-    // Attach Plane to Camera
-    const camera = viewer.camera;
-    const forwardVec = Cesium.Cartesian3.multiplyByScalar(camera.direction, 25, new Cesium.Cartesian3());
-    const planePos = Cesium.Cartesian3.add(camera.position, forwardVec, new Cesium.Cartesian3());
+    if (keys['KeyW']) hpRoll.pitch -= 0.02;
+    if (keys['KeyS']) hpRoll.pitch += 0.02;
+    if (keys['KeyA']) hpRoll.roll -= 0.04;
+    if (keys['KeyD']) hpRoll.roll += 0.04;
     
-    plane.position = planePos;
-    plane.orientation = Cesium.Transforms.headingPitchRollQuaternion(
-        planePos, 
-        new Cesium.HeadingPitchRoll(camera.heading, camera.pitch, camera.roll)
-    );
+    // Auto-leveling/Drift
+    hpRoll.roll *= 0.95; 
+    hpRoll.heading += (hpRoll.roll * 0.05);
 
-    // Update HUD display
-    document.getElementById('speed').innerText = Math.floor(speed * 200);
-    document.getElementById('alt').innerText = Math.floor(camera.positionCartographic.height * 3.28);
+    // Calculate velocity vector
+    const rotationMatrix = Cesium.Matrix3.fromHeadingPitchRoll(hpRoll);
+    const direction = Cesium.Matrix3.multiplyByVector(rotationMatrix, Cesium.Cartesian3.UNIT_X, new Cesium.Cartesian3());
+    const velocity = Cesium.Cartesian3.multiplyByScalar(direction, speed, new Cesium.Cartesian3());
+    
+    // Update position
+    Cesium.Cartesian3.add(position, velocity, position);
+    
+    // Update entity
+    plane.position = position;
+    plane.orientation = Cesium.Transforms.headingPitchRollQuaternion(position, hpRoll);
+
+    // Update camera to follow
+    viewer.camera.lookAt(position, new Cesium.Cartesian3(-60, 0, 15));
+    viewer.camera.lookAtTransform(Cesium.Matrix4.IDENTITY);
+
+    // UI Updates
+    document.getElementById('speed').innerText = Math.floor(speed * 20);
+    const carto = Cesium.Cartographic.fromCartesian(position);
+    document.getElementById('alt').innerText = Math.floor(carto.height * 3.28);
 });
 </script>
 </body>
