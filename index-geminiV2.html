@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>3D Browser Flight Sim</title>
+    <script src="https://cesium.com/downloads/cesiumjs/releases/1.110/Build/Cesium/Cesium.js"></script>
+    <link href="https://cesium.com/downloads/cesiumjs/releases/1.110/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
+    <style>
+        body, html, #cesiumContainer { width: 100%; height: 100%; margin: 0; padding: 0; overflow: hidden; background: #000; }
+        #hud { position: absolute; top: 20px; left: 20px; color: #00ff00; font-family: 'monospace'; 
+               background: rgba(0, 0, 0, 0.7); padding: 15px; border: 1px solid #00ff00; pointer-events: none; z-index: 10; }
+        .ctrl-hint { font-size: 11px; color: #00cc00; margin-top: 10px; border-top: 1px solid #004400; padding-top: 5px; }
+    </style>
+</head>
+<body>
+    <div id="cesiumContainer"></div>
+    <div id="hud">
+        <div>SPD: <span id="speed">0</span> KNTS</div>
+        <div>ALT: <span id="alt">0</span> FT</div>
+        <div class="ctrl-hint">
+            W/S: PITCH | A/D: ROLL<br>
+            SHIFT: THRUST | CTRL: BRAKE
+        </div>
+    </div>
+
+<script>
+// 1. YOUR TOKEN GOES HERE
+Cesium.Ion.defaultAccessToken = 'PASTE_YOUR_CESIUM_TOKEN_HERE';
+
+// 2. Initialize the 3D World
+const viewer = new Cesium.Viewer('cesiumContainer', {
+    terrainProvider: Cesium.createWorldTerrain(),
+    animation: false, timeline: false, infoBox: false, selectionIndicator: false,
+    baseLayerPicker: false, sceneModePicker: false
+});
+
+// 3. Add Google 3D Tiles (Make sure to "Add" this asset in your Cesium Ion Asset Depot)
+async function addGoogleTiles() {
+    try {
+        const tileset = await Cesium.Cesium3DTileset.fromIonAssetId(2275207); // Asset ID for Google 3D Tiles
+        viewer.scene.primitives.add(tileset);
+    } catch (error) {
+        // Fallback to OSM Buildings if Google Tiles fail
+        viewer.scene.primitives.add(Cesium.createOsmBuildings());
+    }
+}
+addGoogleTiles();
+
+// 4. Spawn Plane & Set Camera
+const planeModel = 'https://raw.githubusercontent.com/CesiumGS/cesium/main/Apps/SampleData/models/CesiumAir/Cesium_Air.glb';
+const plane = viewer.entities.add({
+    model: { uri: planeModel, minimumPixelSize: 128 }
+});
+
+viewer.camera.setView({
+    destination: Cesium.Cartesian3.fromDegrees(-122.4194, 37.7749, 1000), // Start over San Francisco
+    orientation: { heading: 0, pitch: 0, roll: 0 }
+});
+
+// 5. Flight Physics Logic
+let speed = 0;
+const keys = {};
+window.onkeydown = (e) => keys[e.code] = true;
+window.onkeyup = (e) => keys[e.code] = false;
+
+viewer.scene.preRender.addEventListener(() => {
+    // Thrust & Braking
+    if (keys['ShiftLeft']) speed += 0.05;
+    if (keys['ControlLeft']) speed = Math.max(0, speed - 0.05);
+    
+    // Steering
+    if (keys['KeyW']) viewer.camera.lookUp(0.01);
+    if (keys['KeyS']) viewer.camera.lookDown(0.01);
+    if (keys['KeyA']) viewer.camera.lookLeft(0.02);
+    if (keys['KeyD']) viewer.camera.lookRight(0.02);
+
+    // Apply movement
+    viewer.camera.moveForward(speed);
+
+    // Attach Plane to Camera
+    const camera = viewer.camera;
+    const forwardVec = Cesium.Cartesian3.multiplyByScalar(camera.direction, 25, new Cesium.Cartesian3());
+    const planePos = Cesium.Cartesian3.add(camera.position, forwardVec, new Cesium.Cartesian3());
+    
+    plane.position = planePos;
+    plane.orientation = Cesium.Transforms.headingPitchRollQuaternion(
+        planePos, 
+        new Cesium.HeadingPitchRoll(camera.heading, camera.pitch, camera.roll)
+    );
+
+    // Update HUD display
+    document.getElementById('speed').innerText = Math.floor(speed * 200);
+    document.getElementById('alt').innerText = Math.floor(camera.positionCartographic.height * 3.28);
+});
+</script>
+</body>
+</html>
